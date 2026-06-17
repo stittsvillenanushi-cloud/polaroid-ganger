@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pdf
+# user photo folders / outputs
+photos/
+real_photos/
+*.jpg
+*.jpeg
+*.png
+*.heic
+!example/*
