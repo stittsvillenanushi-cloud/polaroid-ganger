@@ -71,6 +71,11 @@ python3 polaroid_ganger.py --input ~/Desktop/my-polaroids --sheet 12x18 --chin n
 python3 polaroid_ganger.py --input ~/Desktop/my-polaroids --filter subtle --output album.pdf
 ```
 
+**Dial in a warm, amber polaroid tone** (tweak the numbers to taste):
+```bash
+python3 polaroid_ganger.py --input ~/Desktop/my-polaroids --filter 1.2 --warmth 2 --output album.pdf
+```
+
 **Caption every photo with its filename:**
 ```bash
 python3 polaroid_ganger.py --input ~/Desktop/my-polaroids --caption filename --output album.pdf
@@ -111,7 +116,8 @@ flag needed.
 | `--style` | `polaroid` | `polaroid` (3.5×4.25) / `instax-mini` / `instax-square` |
 | `--sheet` | `letter` | `letter a4 4x6 5x7 8x10 11x14 12x18` or custom `WxH` |
 | `--dpi` | `300` | Print resolution |
-| `--filter` | `subtle` | `none` / `subtle` / `strong` vintage look |
+| `--filter` | `subtle` | Fade/contrast: `none`/`subtle`/`strong` **or any number** (e.g. `1.5`) |
+| `--warmth` | `1.0` | Amber dial: `0`=neutral, `1`=default, `2`=toasty, `3+`=heavy |
 | `--chin` | `auto` | `classic`=always chin · `auto`=tall photos fill unless captioned · `none`=even borders |
 | `--pack` | `center` | `center` / `tight` (top-left) / `fill` (spread to edges) |
 | `--auto-orient` | off | Also try landscape sheet, keep whichever fits more |

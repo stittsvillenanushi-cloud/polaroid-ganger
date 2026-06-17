@@ -153,22 +153,29 @@ def cover_crop(img, target_w, target_h, fx=0.5, fy=0.5):
     return img.crop((left, top, left + target_w, top + target_h))
 
 
-def polaroid_filter(img, strength):
-    """Subtle vintage look: warm tone, faded/lifted blacks, soft contrast."""
-    if strength <= 0:
+def polaroid_filter(img, strength, warmth=1.0):
+    """Vintage polaroid look.
+
+    strength : fade/contrast/saturation amount (0 = off, 1 = subtle, 2 = strong).
+    warmth   : amber tone, dialed independently (0 = neutral, 1 = default,
+               2 = toasty, 3+ = heavy amber). You can push warmth even with
+               strength low if you only want the warm cast.
+    """
+    if strength <= 0 and warmth <= 0:
         return img
-    img = ImageEnhance.Color(img).enhance(1.0 + 0.06 * strength)      # touch more saturation
-    img = ImageEnhance.Contrast(img).enhance(1.0 - 0.07 * strength)   # softer contrast
-    img = ImageEnhance.Brightness(img).enhance(1.0 + 0.03 * strength) # slight lift
+    if strength > 0:
+        img = ImageEnhance.Color(img).enhance(1.0 + 0.06 * strength)      # touch more saturation
+        img = ImageEnhance.Contrast(img).enhance(1.0 - 0.07 * strength)   # softer contrast
+        img = ImageEnhance.Brightness(img).enhance(1.0 + 0.03 * strength) # slight lift
 
     def lut(lift, gain):
         return [min(255, int(lift + v * (255 - lift) / 255 * gain)) for v in range(256)]
 
-    lift = 16 * strength
+    lift = 16 * max(strength, 0.0)
     r, g, b = img.split()
-    r = r.point(lut(lift, 1.05))          # warm up reds
-    g = g.point(lut(lift, 1.00))
-    b = b.point(lut(lift * 1.25, 0.95))   # pull blues down, lift shadows more
+    r = r.point(lut(lift, 1.0 + 0.05 * warmth))         # warm up reds
+    g = g.point(lut(lift, 1.0 + 0.01 * warmth))         # a hair of green for amber
+    b = b.point(lut(lift * 1.25, 1.0 - 0.05 * warmth))  # pull blues down
     return Image.merge("RGB", (r, g, b))
 
 
@@ -197,7 +204,7 @@ def load_font(size):
         return ImageFont.load_default()
 
 
-def make_tile(path, style, dpi, fx, fy, caption, filt, chin_mode="classic"):
+def make_tile(path, style, dpi, fx, fy, caption, filt, chin_mode="classic", warmth=1.0):
     fw, fh = (round(d * dpi) for d in style["frame"])
     border = round(style["top"] * dpi)
 
@@ -215,7 +222,7 @@ def make_tile(path, style, dpi, fx, fy, caption, filt, chin_mode="classic"):
             ww, wh = fw - 2 * border, fh - 2 * border
             top, left = border, border
         photo = cover_crop(im, ww, wh, fx, fy)
-    photo = polaroid_filter(photo, filt)
+    photo = polaroid_filter(photo, filt, warmth)
     tile.paste(photo, (left, top))
 
     if caption:
@@ -306,8 +313,11 @@ def main():
                     help="center=grid centered; tight=top-left packed; fill=spread to edges")
     ap.add_argument("--auto-orient", action="store_true",
                     help="Try landscape sheet too, keep whichever fits more tiles")
-    ap.add_argument("--filter", default="subtle", choices=["none", "subtle", "strong"],
-                    help="Polaroid vintage filter strength")
+    ap.add_argument("--filter", default="subtle",
+                    help="Fade/contrast strength: none|subtle|strong, or any number "
+                         "(e.g. 1.5). 0 = off.")
+    ap.add_argument("--warmth", type=float, default=1.0,
+                    help="Amber warmth dial: 0=neutral, 1=default, 2=toasty, 3+=heavy.")
     ap.add_argument("--chin", default="auto", choices=["classic", "auto", "none"],
                     help="classic=always polaroid chin; auto=portrait photos fill (no chin) "
                          "unless captioned; none=even borders for all")
@@ -321,10 +331,18 @@ def main():
     files = load_images(args.input)
     meta = load_meta(args.input)
     default_focus = parse_focus(args.focus)
-    filt = {"none": 0.0, "subtle": 1.0, "strong": 2.0}[args.filter]
+    presets = {"none": 0.0, "subtle": 1.0, "strong": 2.0}
+    fkey = args.filter.strip().lower()
+    if fkey in presets:
+        filt = presets[fkey]
+    else:
+        try:
+            filt = max(0.0, float(args.filter))
+        except ValueError:
+            sys.exit(f"❌ Bad --filter '{args.filter}'. Use none/subtle/strong or a number.")
 
     print(f"📋 {len(files)} photos | {args.style} | {args.sheet} @ {args.dpi}dpi"
-          f" | filter={args.filter} | pack={args.pack}")
+          f" | filter={filt:g} warmth={args.warmth:g} | pack={args.pack}")
     tiles = []
     for n, f in enumerate(files, 1):
         name = os.path.basename(f)
@@ -337,7 +355,7 @@ def main():
         else:
             cap = args.caption
         try:
-            tiles.append(make_tile(f, style, args.dpi, fx, fy, cap, filt, args.chin))
+            tiles.append(make_tile(f, style, args.dpi, fx, fy, cap, filt, args.chin, args.warmth))
         except Exception as e:
             print(f"\n⚠️  Skipped {name}: {e}")
         print(f"\r🔄 Framing {n}/{len(files)}", end="", flush=True)
