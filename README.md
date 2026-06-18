@@ -6,22 +6,40 @@ export a print-ready PDF. Then print and guillotine into individual photos.
 
 ---
 
-## 1. One-time setup
+## 1. One-time setup (virtual environment)
 
-You need Python 3 and Pillow (image library).
+You need **Python 3.8+**. Everything installs into a self-contained `venv` folder
+so it never touches your system Python.
 
 ```bash
-# Check Python (macOS has it built in)
-python3 --version
+# 1. Go into the project
+cd ~/claude/github/polaroid-ganger
 
-# Install Pillow if you don't have it
-pip3 install Pillow
+# 2. Create the virtual environment (makes a ./venv folder)
+python3 -m venv venv
 
-# Optional: only if your photos are iPhone .HEIC files
-pip3 install pillow-heif
+# 3. Activate it  (you'll see "(venv)" appear in your prompt)
+source venv/bin/activate            # macOS / Linux
+# venv\Scripts\activate             # Windows PowerShell
+
+# 4. Install the dependencies
+pip install -r requirements.txt
 ```
 
 That's it. The whole tool is one file: `polaroid_ganger.py`.
+
+**Every new terminal session**, re-activate before running:
+
+```bash
+cd ~/claude/github/polaroid-ganger
+source venv/bin/activate
+```
+
+When you're done, leave the venv with:
+
+```bash
+deactivate
+```
 
 ---
 
@@ -45,16 +63,29 @@ Supported: jpg, jpeg, png, webp, tif/tiff, bmp, gif (+ heic with pillow-heif).
 
 ```bash
 cd ~/claude/github/polaroid-ganger
+source venv/bin/activate            # if not already active
 
 python3 polaroid_ganger.py --input ~/Desktop/my-polaroids --output album.pdf
 ```
 
 You'll get `album.pdf` — open it, print at **100% / "Actual Size"** (no "fit to
-page"), then cut along the corner crop marks. Each photo comes out 3.5 × 4.25".
+page"), then guillotine **straight across the full-page guide lines**. By default
+photos are packed `grid` (shared edges, no gutter) so neighbours share a single
+cut line — that fits the most photos per sheet and means the fewest cuts. Each
+photo comes out 3.5 × 4.25".
 
 ---
 
 ## 4. Common recipes
+
+**Walmart in-store 11×14 — 9 polaroids per sheet, ready to upload** (recommended):
+```bash
+python3 polaroid_ganger.py --input ~/Desktop/my-polaroids \
+    --sheet 11x14 --margin 0.25 --guide-weight 2.5 --format jpg \
+    --output album_11x14.jpg
+```
+Gives a `3300×4200px` JPG. Upload as an **11×14** print, auto-crop **off**,
+auto-enhance **off**, then cut along the full-page guide lines.
 
 **Cheapest route — one polaroid per 4×6 print** (upload-and-trim):
 ```bash
@@ -119,11 +150,13 @@ flag needed.
 | `--filter` | `subtle` | Fade/contrast: `none`/`subtle`/`strong` **or any number** (e.g. `1.5`) |
 | `--warmth` | `1.0` | Amber dial: `0`=neutral, `1`=default, `2`=toasty, `3+`=heavy |
 | `--chin` | `auto` | `classic`=always chin · `auto`=tall photos fill unless captioned · `none`=even borders |
-| `--pack` | `center` | `center` / `tight` (top-left) / `fill` (spread to edges) |
+| `--pack` | `grid` | `grid`=shared edges, no gutter (most photos, fewest cuts) / `center` / `tight` (top-left) / `fill` (spread to edges) |
 | `--auto-orient` | off | Also try landscape sheet, keep whichever fits more |
 | `--focus` | `center` | Default crop focus for photos without a meta entry |
 | `--caption` | (none) | `filename` to caption all, or a fixed string |
-| `--no-crop-marks` | off | Hide the corner cut ticks |
+| `--guides` | `lines` | `lines`=full-page cut lines · `marks`=corner ticks · `both` · `none` |
+| `--guide-weight` | `2.0` | Thickness of the full-page guide lines (`1`=hairline, `3+`=bold) |
+| `--no-crop-marks` | off | Shortcut for `--guides none` |
 
 ---
 

@@ -237,12 +237,38 @@ def make_tile(path, style, dpi, fx, fy, caption, filt, chin_mode="classic", warm
     return tile
 
 
-def draw_crop_marks(draw, x, y, w, h, dpi):
-    n = round(0.12 * dpi)
-    c, wd = (120, 120, 120), max(1, round(dpi / 150))
-    for cx, cy in ((x, y), (x + w, y), (x, y + h), (x + w, y + h)):
-        draw.line([(cx - n, cy), (cx + n, cy)], fill=c, width=wd)
-        draw.line([(cx, cy - n), (cx, cy + n)], fill=c, width=wd)
+def draw_crop_marks(draw, x, y, w, h, dpi, gap):
+    # Outward-only ticks that live in the gutter/margin — never on the tile.
+    # `gap` caps the length so two neighbours' marks meet without crossing tiles.
+    n = max(2, min(round(0.1 * dpi), gap))
+    c, wd = (150, 150, 150), max(1, round(dpi / 200))
+    for cx, cy, sx, sy in ((x, y, -1, -1), (x + w, y, 1, -1),
+                           (x, y + h, -1, 1), (x + w, y + h, 1, 1)):
+        draw.line([(cx, cy), (cx + sx * n, cy)], fill=c, width=wd)  # horizontal, outward
+        draw.line([(cx, cy), (cx, cy + sy * n)], fill=c, width=wd)  # vertical, outward
+
+
+def draw_cut_lines(draw, rects, sw, sh, dpi, weight, color=(90, 90, 90)):
+    """Full-page alignment/cut lines along every tile edge.
+
+    Drawn *before* the tiles are pasted, so each line shows only in the gutters
+    and margins — but because every edge spans the whole sheet you get one
+    continuous straight reference top-to-bottom and left-to-right. With a
+    shared-edge grid (zero gutter) the marks land in the top/bottom/left/right
+    margins perfectly in line, so a guillotine cuts straight across in one pass.
+    `weight` scales thickness (1 = hairline, 2 = default chunky guide).
+    """
+    if not rects:
+        return
+    xs, ys = set(), set()
+    for x, y, w, h in rects:
+        xs.update((x, x + w))
+        ys.update((y, y + h))
+    wd = max(1, round(dpi / 200 * weight))
+    for x in sorted(xs):
+        draw.line([(x, 0), (x, sh)], fill=color, width=wd)   # vertical, full height
+    for y in sorted(ys):
+        draw.line([(0, y), (sw, y)], fill=color, width=wd)   # horizontal, full width
 
 
 def grid_for(sheet_in, tw, th, dpi, gutter_in, margin_in):
@@ -253,8 +279,14 @@ def grid_for(sheet_in, tw, th, dpi, gutter_in, margin_in):
     return sw, sh, g, m, cols, rows
 
 
-def build_sheets(tiles, sheet_in, dpi, gutter_in, margin_in, marks, pack, auto_orient):
+def build_sheets(tiles, sheet_in, dpi, gutter_in, margin_in, guides, guide_weight,
+                 pack, auto_orient):
     tw, th = tiles[0].size
+
+    # Shared-edge grid: butt tiles together (no gutter) so neighbours share a
+    # single cut line — fits more per sheet and minimises cuts.
+    if pack == "grid":
+        gutter_in = 0.0
 
     candidates = [sheet_in]
     if auto_orient:
@@ -276,25 +308,37 @@ def build_sheets(tiles, sheet_in, dpi, gutter_in, margin_in, marks, pack, auto_o
         on_page = min(per_page, len(tiles) - i)
         # how many rows this page actually fills (last page may be short)
         used_rows = (on_page + cols - 1) // cols
+
+        # First pass: work out every tile's rectangle + its local gutter.
+        placements = []  # (slot, x, y, gut)
         for slot in range(on_page):
             r, c = divmod(slot, cols)
             row_items = min(cols, on_page - r * cols)
             if pack == "tight":
-                x, y = m + c * (tw + g), m + r * (th + g)
+                x, y, gut = m + c * (tw + g), m + r * (th + g), g
             elif pack == "fill":
                 # spread tiles edge-to-edge inside the margins
                 gx = (sw - 2 * m - row_items * tw) // max(1, row_items - 1) if row_items > 1 else 0
                 gy = (sh - 2 * m - used_rows * th) // max(1, used_rows - 1) if used_rows > 1 else 0
-                x = m + c * (tw + gx)
-                y = m + r * (th + gy)
-            else:  # center
+                x, y, gut = m + c * (tw + gx), m + r * (th + gy), min(gx, gy)
+            else:  # center / grid (grid forced g=0 above)
                 bw = cols * tw + (cols - 1) * g
                 bh = rows * th + (rows - 1) * g
                 x = (sw - bw) // 2 + c * (tw + g)
                 y = (sh - bh) // 2 + r * (th + g)
+                gut = g
+            placements.append((slot, x, y, gut))
+
+        # Full-page alignment lines go down *first* so tiles cover the inner
+        # part and only the gutter/margin reference remains.
+        if guides in ("lines", "both"):
+            rects = [(x, y, tw, th) for _, x, y, _ in placements]
+            draw_cut_lines(draw, rects, sw, sh, dpi, guide_weight)
+
+        for slot, x, y, gut in placements:
             page.paste(tiles[i + slot], (x, y))
-            if marks:
-                draw_crop_marks(draw, x, y, tw, th, dpi)
+            if guides in ("marks", "both"):
+                draw_crop_marks(draw, x, y, tw, th, dpi, max(1, gut // 2))
         pages.append(page)
         i += on_page
     return pages, sheet_in, cols, rows, per_page
@@ -309,8 +353,9 @@ def main():
     ap.add_argument("--dpi", type=int, default=300)
     ap.add_argument("--gutter", type=float, default=0.1, help="Gap between tiles (inches)")
     ap.add_argument("--margin", type=float, default=0.18, help="Sheet edge margin (inches)")
-    ap.add_argument("--pack", default="center", choices=["center", "tight", "fill"],
-                    help="center=grid centered; tight=top-left packed; fill=spread to edges")
+    ap.add_argument("--pack", default="grid", choices=["grid", "center", "tight", "fill"],
+                    help="grid=shared edges, no gutter (most photos, fewest cuts); "
+                         "center=grid centered; tight=top-left packed; fill=spread to edges")
     ap.add_argument("--auto-orient", action="store_true",
                     help="Try landscape sheet too, keep whichever fits more tiles")
     ap.add_argument("--filter", default="subtle",
@@ -323,8 +368,20 @@ def main():
                          "unless captioned; none=even borders for all")
     ap.add_argument("--focus", default="center", help="Default crop focus for photos w/o meta")
     ap.add_argument("--caption", default="", help="'filename' to caption all, else a fixed string")
-    ap.add_argument("--no-crop-marks", action="store_true")
+    ap.add_argument("--guides", default="lines",
+                    choices=["lines", "marks", "both", "none"],
+                    help="lines=full-page cut/alignment lines (default); marks=corner "
+                         "ticks only; both=lines+ticks; none=no guides")
+    ap.add_argument("--guide-weight", type=float, default=2.0,
+                    help="Thickness of full-page guide lines (1=hairline, 2=default, 3+=bold)")
+    ap.add_argument("--no-crop-marks", action="store_true",
+                    help="Shortcut for --guides none")
+    ap.add_argument("--format", default="pdf", choices=["pdf", "jpg", "png", "both"],
+                    help="pdf=single multipage PDF; jpg/png=one image file per sheet "
+                         "(for photo-lab upload, e.g. Walmart 11x14); both=PDF + images")
     args = ap.parse_args()
+
+    guides = "none" if args.no_crop_marks else args.guides
 
     style = STYLES[args.style]
     sheet_in = parse_sheet(args.sheet)
@@ -365,17 +422,39 @@ def main():
 
     pages, used_sheet, cols, rows, per_page = build_sheets(
         tiles, sheet_in, args.dpi, args.gutter, args.margin,
-        not args.no_crop_marks, args.pack, args.auto_orient,
+        guides, args.guide_weight, args.pack, args.auto_orient,
     )
     tile_area = style["frame"][0] * style["frame"][1] * per_page
     sheet_area = used_sheet[0] * used_sheet[1]
     print(f"📋 Grid: {cols}×{rows} = {per_page}/page on {used_sheet[0]}x{used_sheet[1]}\" "
           f"→ {len(pages)} page(s) | sheet fill ≈ {tile_area / sheet_area * 100:.0f}%")
 
-    pages[0].save(args.output, "PDF", resolution=args.dpi,
-                  save_all=True, append_images=pages[1:])
-    print(f"✅ Wrote {args.output} ({len(tiles)} polaroids, {len(pages)} page(s))")
-    print("   Print at 100% / 'Actual size' (no scaling), then cut along the crop marks.")
+    base, ext = os.path.splitext(args.output)
+    wrote = []
+    if args.format in ("pdf", "both"):
+        pdf_path = args.output if ext.lower() == ".pdf" else base + ".pdf"
+        pages[0].save(pdf_path, "PDF", resolution=args.dpi,
+                      save_all=True, append_images=pages[1:])
+        wrote.append(pdf_path)
+    if args.format in ("jpg", "png", "both"):
+        imgfmt = "png" if args.format == "png" else "jpg"  # 'both' exports JPG
+        pil_fmt = "PNG" if imgfmt == "png" else "JPEG"
+        opts = {"dpi": (args.dpi, args.dpi)}
+        if pil_fmt == "JPEG":
+            opts.update(quality=95, subsampling=0)
+        for n, page in enumerate(pages, 1):
+            suffix = f".{imgfmt}" if len(pages) == 1 else f"_p{n:02d}.{imgfmt}"
+            img_path = base + suffix
+            page.save(img_path, pil_fmt, **opts)
+            wrote.append(img_path)
+
+    px_w, px_h = pages[0].size
+    print(f"✅ Wrote {len(tiles)} polaroids on {len(pages)} sheet(s) "
+          f"@ {px_w}×{px_h}px ({args.dpi}dpi):")
+    for p in wrote:
+        print(f"   • {p}")
+    print("   Print at 100% / 'Actual size' (no scaling), then guillotine straight"
+          " across along the full-page guide lines.")
 
 
 if __name__ == "__main__":
