@@ -38,7 +38,10 @@ Examples:
 import argparse
 import csv
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
@@ -61,6 +64,7 @@ SHEETS = {  # width x height in inches (portrait)
 }
 
 EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".heic", ".heif", ".gif"}
+VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".avi"}  # only used with --include-video
 
 FOCUS_KEYWORDS = {
     "center": (0.5, 0.5), "top": (0.5, 0.0), "bottom": (0.5, 1.0),
@@ -127,16 +131,41 @@ def load_meta(folder):
     return meta
 
 
-def load_images(folder):
+def load_images(folder, include_video=False):
     if not os.path.isdir(folder):
         sys.exit(f"❌ --input folder not found: {folder}")
+    allowed = EXTS | VIDEO_EXTS if include_video else EXTS
     files = sorted(
         os.path.join(folder, f) for f in os.listdir(folder)
-        if os.path.splitext(f)[1].lower() in EXTS
+        if os.path.splitext(f)[1].lower() in allowed
     )
     if not files:
-        sys.exit(f"❌ No images found in {folder} (looked for {sorted(EXTS)}).")
+        sys.exit(f"❌ No images found in {folder} (looked for {sorted(allowed)}).")
     return files
+
+
+def open_source(path):
+    """Open a still image, or pull the first frame from a video (needs ffmpeg)."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in VIDEO_EXTS:
+        return Image.open(path)
+    if not shutil.which("ffmpeg"):
+        raise RuntimeError("ffmpeg not installed — needed to read video frames "
+                           "(brew install ffmpeg)")
+    fd, tmp = tempfile.mkstemp(suffix=".png")
+    os.close(fd)
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", path,
+             "-frames:v", "1", "-q:v", "2", tmp],
+            check=True,
+        )
+        img = Image.open(tmp)
+        img.load()  # read pixels before the temp file is deleted
+        return img
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 
 def cover_crop(img, target_w, target_h, fx=0.5, fy=0.5):
@@ -209,7 +238,7 @@ def make_tile(path, style, dpi, fx, fy, caption, filt, chin_mode="classic", warm
     border = round(style["top"] * dpi)
 
     tile = Image.new("RGB", (fw, fh), "white")
-    with Image.open(path) as im:
+    with open_source(path) as im:
         src_w, src_h = im.size
         portrait = src_h > src_w * 1.1
         # chin needed for captions; otherwise decide by mode/orientation
@@ -379,13 +408,16 @@ def main():
     ap.add_argument("--format", default="pdf", choices=["pdf", "jpg", "png", "both"],
                     help="pdf=single multipage PDF; jpg/png=one image file per sheet "
                          "(for photo-lab upload, e.g. Walmart 11x14); both=PDF + images")
+    ap.add_argument("--include-video", action="store_true",
+                    help="Also frame .mp4/.mov clips (e.g. Live Photos) by grabbing "
+                         "their first frame — requires ffmpeg")
     args = ap.parse_args()
 
     guides = "none" if args.no_crop_marks else args.guides
 
     style = STYLES[args.style]
     sheet_in = parse_sheet(args.sheet)
-    files = load_images(args.input)
+    files = load_images(args.input, args.include_video)
     meta = load_meta(args.input)
     default_focus = parse_focus(args.focus)
     presets = {"none": 0.0, "subtle": 1.0, "strong": 2.0}

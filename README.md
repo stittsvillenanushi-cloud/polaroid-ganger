@@ -157,6 +157,8 @@ flag needed.
 | `--guides` | `lines` | `lines`=full-page cut lines · `marks`=corner ticks · `both` · `none` |
 | `--guide-weight` | `2.0` | Thickness of the full-page guide lines (`1`=hairline, `3+`=bold) |
 | `--no-crop-marks` | off | Shortcut for `--guides none` |
+| `--format` | `pdf` | `pdf` / `jpg` / `png` / `both` — image formats give one file per sheet for photo-lab upload |
+| `--include-video` | off | Also frame `.mp4`/`.mov` clips (e.g. Live Photos) by grabbing their first frame — needs `ffmpeg` |
 
 ---
 
