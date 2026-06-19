@@ -12,6 +12,10 @@ INPUT="${1:?Usage: bash make_8x10.sh /path/to/photos [filter] [warmth]}"
 FILTER="${2:-subtle}"
 WARMTH="${3:-1}"
 
+# Encode the settings into the filename so different runs don't overwrite
+# each other — makes it easy to compare looks side by side.
+OUTPUT="album_8x10_${FILTER}_w${WARMTH}.jpg"
+
 python3 polaroid_ganger.py \
     --input "$INPUT" \
     --sheet 8x10 \
@@ -22,4 +26,6 @@ python3 polaroid_ganger.py \
     --warmth "$WARMTH" \
     --format jpg \
     --include-video \
-    --output album_8x10.jpg
+    --output "$OUTPUT"
+
+echo "📋 wrote files starting with: ${OUTPUT%.jpg}_p01.jpg"
